@@ -1,0 +1,109 @@
+int equal_slices(slice a, slice b) asm "SDEQ";
+
+;; Tets #1 It should retranslate messages
+[int, tuple, cell, tuple, int] test_example_data() method_id(0) {
+    int function_selector = 0;
+
+    cell my_address = begin_cell()
+                        .store_uint(1, 2)
+                        .store_uint(5, 9)
+                        .store_uint(7, 5)
+                        .end_cell();
+
+    cell their_address = begin_cell()
+                            .store_uint(1, 2)
+                            .store_uint(5, 9)
+                            .store_uint(8, 5)
+                            .end_cell();
+
+    slice message_body = begin_cell()
+                            .store_uint(12345, 32)
+                            .end_cell()
+                            .begin_parse();
+
+    cell message = begin_cell()
+                    .store_uint(0x6, 4)
+                    .store_slice(their_address.begin_parse())
+                    .store_slice(their_address.begin_parse())
+                    .store_grams(100)
+                    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+                    .store_slice(message_body)
+                    .end_cell();
+
+    tuple stack = unsafe_tuple([12345, 100, message, message_body]);
+
+    return [function_selector, stack, my_address, get_c7(), null()];
+}
+
+_ test_example(int exit_code, cell data, tuple stack, cell actions, int gas) method_id(1) {
+    throw_if(100, exit_code != 0);
+
+    slice actions = actions.begin_parse();
+    throw_if(101, actions~load_uint(32) != 0x0ec3c86d); ;; check that operation is message sending
+
+    throw_if(102, ~ slice_empty?(actions~load_ref().begin_parse()));
+
+    slice msg = actions~load_ref().begin_parse();
+    throw_if(103, msg~load_uint(6) != 0x10);
+
+    slice send_to_address = msg~load_msg_addr();
+    slice expected_my_address = begin_cell()
+                                    .store_uint(1, 2)
+                                    .store_uint(5, 9)
+                                    .store_uint(7, 5)
+                                    .end_cell()
+                                    .begin_parse();
+
+    throw_if(104, ~ equal_slices(expected_my_address, send_to_address));
+    throw_if(105, msg~load_grams() != 0);
+    throw_if(106, msg~load_uint(1 + 4 + 4 + 64 + 32 + 1 + 1) != 0);
+
+    slice sender_address = msg~load_msg_addr();
+    slice expected_sender_address = begin_cell()
+                                        .store_uint(1, 2)
+                                        .store_uint(5, 9)
+                                        .store_uint(8, 5)
+                                        .end_cell()
+                                        .begin_parse();
+    throw_if(107, ~ equal_slices(sender_address, expected_sender_address));
+
+    slice fwd_msg = msg~load_ref().begin_parse();
+    throw_if(108, fwd_msg~load_uint(32) != 12345);
+    fwd_msg.end_parse(); ;; approach to check that fwd_msg slice is empty
+    msg.end_parse(); ;; approach to check that msg slice is empty
+}
+
+;; Test #2 It should throw if message sender is contract owner, so you can't send message and retranslate it to yourself
+[int, tuple, cell, tuple, int] test_same_addr_data() method_id(2) {
+    int function_selector = 0;
+
+    cell my_address = begin_cell()
+                        .store_uint(1, 2)
+                        .store_uint(5, 9)
+                        .store_uint(7, 5)
+                        .end_cell();
+
+    slice message_body = begin_cell()
+                            .store_uint(12345, 32)
+                            .end_cell()
+                            .begin_parse();
+
+    cell message = begin_cell()
+                    .store_uint(0x6, 4)
+                    .store_slice(my_address.begin_parse())
+                    .store_slice(my_address.begin_parse())
+                    .store_grams(100)
+                    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+                    .store_slice(message_body)
+                    .end_cell();
+
+    tuple stack = unsafe_tuple([12345, 100, message, message_body]);
+
+    return [function_selector, stack, my_address, get_c7(), null()];
+}
+
+_ test_same_addr(int exit_code, cell data, tuple stack, cell actions, int gas) method_id(3) {
+    throw_if(109, exit_code != 0);
+
+    throw_if(110, ~ slice_empty?(actions.begin_parse()));
+}
